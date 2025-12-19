@@ -145,25 +145,29 @@ typedef enum lessErrorType {
 extern "C" {            // Prevents name mangling of functions
 #endif
 
+#include "stdio.h"
+
 // Load only one resource chunk (first resource id found)
-LESSAPI lessResourceChunk lessLoadResourceChunk(const char *fileName, unsigned int lessId);  // Load one resource chunk for provided id
+LESSAPI lessResourceChunk lessLoadResourceChunk(const char *fileName, unsigned int lessId);  
+LESSAPI lessResourceChunk lessLoadResourceChunkFP(FILE *file, unsigned int lessId);  
+
 LESSAPI void lessUnloadResourceChunk(lessResourceChunk chunk);                      // Unload resource chunk from memory
 
 // Load multi resource chunks for a specified lessId
-LESSAPI lessResourceMulti lessLoadResourceMulti(const char *fileName, unsigned int lessId);  // Load resource for provided id (multiple resource chunks)
-LESSAPI void lessUnloadResourceMulti(lessResourceMulti multi);                      // Unload resource from memory (multiple resource chunks)
+LESSAPI lessResourceMulti lessLoadResourceMulti(const char *fileName, unsigned int lessId);  
+LESSAPI void lessUnloadResourceMulti(lessResourceMulti multi);                     
 
 // Load resource(s) chunk info from file
-LESSAPI lessResourceChunkInfo lessLoadResourceChunkInfo(const char *fileName, unsigned int lessId);  // Load resource chunk info for provided id
-LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAll(const char *fileName, unsigned int *chunkCount); // Load all resource chunks info
+LESSAPI lessResourceChunkInfo lessLoadResourceChunkInfo(const char *fileName, unsigned int lessId);
+LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAll(const char *fileName, unsigned int *chunkCount);
+LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAllFP(FILE *file, unsigned int *chunkCount);
 
-LESSAPI lessCentralDir lessLoadCentralDirectory(const char *fileName);              // Load central directory resource chunk from file
-LESSAPI void lessUnloadCentralDirectory(lessCentralDir dir);                        // Unload central directory resource chunk
+LESSAPI lessCentralDir lessLoadCentralDirectory(const char *fileName);
+LESSAPI lessCentralDir lessLoadCentralDirectoryFP(FILE *file);
+LESSAPI void lessUnloadCentralDirectory(lessCentralDir dir);                        
 
-LESSAPI unsigned int lessGetDataType(const unsigned char *fourCC);                  // Get lessResourceDataType from FourCC code
-LESSAPI int lessGetResourceId(lessCentralDir dir, const char *fileName);            // Get resource id for a provided filename
-                                                                                    // NOTE: It requires CDIR available in the file (it's optinal by design)
-LESSAPI unsigned int lessComputeCRC32(const unsigned char *data, int len);          // Compute CRC32 for provided data
+LESSAPI unsigned int lessGetDataType(const unsigned char *fourCC);                  
+LESSAPI unsigned int lessComputeCRC32(const unsigned char *data, int len);          
 
 // Manage password for data encryption/decryption
 // NOTE: The cipher password is kept as an internal pointer to provided string, it's up to the user to manage that sensible data properly
@@ -204,8 +208,6 @@ LESSAPI const char *lessGetCipherPassword(void);                      // Get pas
 // Load resource chunk packed data into our data struct
 static lessResourceChunkData lessLoadResourceChunkData(lessResourceChunkInfo info, void *packedData);
 
-// verify that less file header is valid
-static bool lessVerifyFileHeader(lessFileHeader header);
 
 //----------------------------------------------------------------------------------
 // Module Functions Definition
@@ -220,67 +222,71 @@ bool lessVerifyFileHeader(lessFileHeader header)
 }
 
 
+lessResourceChunk lessLoadResourceChunkFP(FILE *lessFile, unsigned int lessId)
+{
+   lessResourceChunk chunk = { 0 };
+
+   lessFileHeader header = { 0 };
+   fseek(lessFile, 0, SEEK_SET);
+   fread(&header, sizeof(lessFileHeader), 1, lessFile);
+
+   if ( lessVerifyFileHeader(header) ) {
+
+      bool found = false;
+      for (int i = 0; i < header.chunkCount; i++) {
+
+         lessResourceChunkInfo info = { 0 };
+         fread(&info, sizeof(lessResourceChunkInfo), 1, lessFile);
+
+         // Check if resource id is the requested one
+         if ( info.id == lessId ) {
+
+            found = true;
+            LESS_LOG("LESS: INFO: Found requested resource id: 0x%08x\n", info.id);
+            LESS_LOG("LESS: %c%c%c%c: Id: 0x%08x | Base size: %i | Packed size: %i\n", info.type[0], info.type[1], info.type[2], info.type[3], info.id, info.baseSize, info.packedSize);
+
+            if ( info.nextOffset != 0 ) {
+               LESS_LOG("LESS: WARNING: Multiple linked resource chunks available for the provided id");
+            }
+
+            void *data = LESS_CALLOC(info.packedSize, 1); 
+            fread(data, info.packedSize, 1, lessFile);    
+
+            chunk.data.raw = data;
+            chunk.info = info;
+            break;      // Resource id found and loaded, stop checking the file
+                        
+         } else {
+            // Skip required data size to read next resource info header
+            fseek(lessFile, info.packedSize, SEEK_CUR);
+         }
+      }
+
+      if ( !found ) LESS_LOG("LESS: WARNING: Requested resource not found: 0x%08x\n", lessId);
+
+   } else {
+      LESS_LOG("LESS: WARNING: The provided file is not a valid less file, signature or version not valid\n");
+   }
+
+   return chunk;
+}
+
+
 // Load one resource chunk for provided id
 lessResourceChunk lessLoadResourceChunk(const char *fileName, unsigned int lessId)
 {
-    lessResourceChunk chunk = { 0 };
-    FILE *lessFile = fopen(fileName, "rb");
+   lessResourceChunk chunk = { 0 };
+   FILE *lessFile = fopen(fileName, "rb");
 
-    if (lessFile == NULL) LESS_LOG("LESS: WARNING: [%s] less file could not be opened\n", fileName);
-    else
-    {
-        LESS_LOG("LESS: INFO: Loading resource from file: %s\n", fileName);
+   if (lessFile == NULL) {
+      LESS_LOG("LESS: WARNING: [%s] less file could not be opened\n", fileName);
+   } else {
+      LESS_LOG("LESS: INFO: Loading resource from file: %s\n", fileName);
+      chunk = lessLoadResourceChunkFP(lessFile, lessId);
+      fclose(lessFile);
+   }
 
-        lessFileHeader header = { 0 };
-
-        // Read less file header
-        fread(&header, sizeof(lessFileHeader), 1, lessFile);
-
-        if ( lessVerifyFileHeader(header) ) {
-
-            bool found = false;
-            // Check all available chunks looking for the requested id
-            for (int i = 0; i < header.chunkCount; i++)
-            {
-                lessResourceChunkInfo info = { 0 };
-
-                // Read resource info header
-                fread(&info, sizeof(lessResourceChunkInfo), 1, lessFile);
-
-                // Check if resource id is the requested one
-                if ( info.id == lessId ) {
-
-                    found = true;
-                    LESS_LOG("LESS: INFO: Found requested resource id: 0x%08x\n", info.id);
-                    LESS_LOG("LESS: %c%c%c%c: Id: 0x%08x | Base size: %i | Packed size: %i\n", info.type[0], info.type[1], info.type[2], info.type[3], info.id, info.baseSize, info.packedSize);
-
-                    if ( info.nextOffset != 0 )
-                       LESS_LOG("LESS: WARNING: Multiple linked resource chunks available for the provided id");
-
-
-                    void *data = LESS_CALLOC(info.packedSize, 1); 
-                    fread(data, info.packedSize, 1, lessFile);    
-
-                    chunk.data.raw = data;
-                    chunk.info = info;
-
-                    break;      // Resource id found and loaded, stop checking the file
-                }
-                else
-                {
-                    // Skip required data size to read next resource info header
-                    fseek(lessFile, info.packedSize, SEEK_CUR);
-                }
-            }
-
-            if (!found) LESS_LOG("LESS: WARNING: Requested resource not found: 0x%08x\n", lessId);
-        }
-        else LESS_LOG("LESS: WARNING: The provided file is not a valid less file, file signature or version not valid\n");
-
-        fclose(lessFile);
-    }
-
-    return chunk;
+   return chunk;
 }
 
 // Unload resource chunk from memory
@@ -429,41 +435,118 @@ LESSAPI lessResourceChunkInfo lessLoadResourceChunkInfo(const char *fileName, un
     return info;
 }
 
+
+LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAllFP(FILE *lessFile, unsigned int *chunkCount)
+{
+   unsigned int count = 0;
+   lessResourceChunkInfo *infos = NULL;
+
+   lessFileHeader header = { 0 };
+   fseek(lessFile, 0, SEEK_SET);
+   fread(&header, sizeof(lessFileHeader), 1, lessFile);
+
+   if ( lessVerifyFileHeader(header) ) {
+
+      // Load all resource chunks info
+      infos = (lessResourceChunkInfo *)LESS_CALLOC(header.chunkCount, sizeof(lessResourceChunkInfo));
+      count = header.chunkCount;
+
+      for (unsigned int i = 0; i < count; i++) {
+         fread(&infos[i], sizeof(lessResourceChunkInfo), 1, lessFile); // Read resource chunk info
+         if (infos[i].nextOffset > 0) fseek(lessFile, infos[i].nextOffset, SEEK_SET); // Jump to next resource
+         else fseek(lessFile, infos[i].packedSize, SEEK_CUR); // Jump to next resource
+      }
+
+   } else {
+      LESS_LOG("LESS: WARNING: The provided file is not a valid less file, signature or version not valid\n");
+   }
+
+   *chunkCount = count;
+   return infos;
+}
+
+
 // Load all resource chunks info
 LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAll(const char *fileName, unsigned int *chunkCount)
 {
-    lessResourceChunkInfo *infos = { 0 };
-    unsigned int count = 0;
+   unsigned int count = 0;
+   lessResourceChunkInfo *infos = NULL;
 
-    FILE *lessFile = fopen(fileName, "rb");
+   FILE *lessFile = fopen(fileName, "rb");
 
-    if (lessFile != NULL)
-    {
-        lessFileHeader header = { 0 };
-        fread(&header, sizeof(lessFileHeader), 1, lessFile);
+   if ( lessFile != NULL ) {
+      infos = lessLoadResourceChunkInfoAllFP(lessFile, &count);
+      fclose(lessFile);
+   }
 
-        if ( lessVerifyFileHeader(header) )
-        {
-            // Load all resource chunks info
-            infos = (lessResourceChunkInfo *)LESS_CALLOC(header.chunkCount, sizeof(lessResourceChunkInfo));
-            count = header.chunkCount;
-
-            for (unsigned int i = 0; i < count; i++)
-            {
-                fread(&infos[i], sizeof(lessResourceChunkInfo), 1, lessFile); // Read resource chunk info
-
-                if (infos[i].nextOffset > 0) fseek(lessFile, infos[i].nextOffset, SEEK_SET); // Jump to next resource
-                else fseek(lessFile, infos[i].packedSize, SEEK_CUR); // Jump to next resource
-            }
-        }
-        else LESS_LOG("LESS: WARNING: The provided file is not a valid less file, file signature or version not valid\n");
-
-        fclose(lessFile);
-    }
-
-    *chunkCount = count;
-    return infos;
+   *chunkCount = count;
+   return infos;
 }
+
+
+lessCentralDir lessLoadCentralDirectoryFP(FILE *lessFile)
+{
+   lessCentralDir dir = { 0 };
+   lessFileHeader header = { 0 };
+
+   fseek(lessFile, 0, SEEK_SET);
+   fread(&header, sizeof(lessFileHeader), 1, lessFile);
+
+   if ( lessVerifyFileHeader(header) ) {
+
+      // Check if there is a Central Directory available
+      if (header.cdOffset == 0) {
+
+         LESS_LOG("LESS: WARNING: CDIR: No central directory found\n");
+
+      } else {
+
+          lessResourceChunkInfo info = { 0 };
+
+          fseek(lessFile, header.cdOffset, SEEK_SET); // Move to central directory position
+          fread(&info, sizeof(lessResourceChunkInfo), 1, lessFile); // Read resource info
+
+          // Verify resource type is CDIR
+          if ((info.type[0] == 'C') && (info.type[1] == 'D') && (info.type[2] == 'I') && (info.type[3] == 'R'))
+          {
+              LESS_LOG("LESS: CDIR: Central Directory found at offset: 0x%08x\n", header.cdOffset);
+
+              void *data = LESS_CALLOC(info.packedSize, 1);
+              fread(data, info.packedSize, 1, lessFile);
+
+              lessResourceChunkData chunkData = { 0 };
+              chunkData.raw = data;
+
+              dir.count = *(unsigned int*)chunkData.raw;
+              LESS_LOG("LESS: CDIR: Central Directory file entries count: %i\n", dir.count);
+
+              unsigned char *ptr = (unsigned char *)chunkData.raw + sizeof(int);
+              dir.entries = (lessDirEntry *)LESS_CALLOC(dir.count, sizeof(lessDirEntry));
+
+              for (unsigned int i = 0; i < dir.count; i++)
+              {
+                  dir.entries[i].id = ((int *)ptr)[0];            // Resource id
+                  dir.entries[i].offset = ((int *)ptr)[1];        // Resource offset in file
+                  // NOTE: There is a reserved integer value before fileNameSize
+                  dir.entries[i].fileNameSize = ((int *)ptr)[3];  // Resource fileName size
+
+                  // Resource fileName, NULL terminated and 0-padded to 4-byte,
+                  // fileNameSize considers NULL and padding
+                  memcpy(dir.entries[i].fileName, ptr + 16, dir.entries[i].fileNameSize);
+
+                  ptr += (16 + dir.entries[i].fileNameSize);      // Move pointer for next entry
+              }
+
+              LESS_FREE(chunkData.raw);
+          }
+      }
+   } else {
+      LESS_LOG("LESS: WARNING: The provided file is not a valid less file, signature or version not valid\n");
+   }
+
+   return dir;
+}
+
 
 // Load central directory data
 lessCentralDir lessLoadCentralDirectory(const char *fileName)
@@ -471,59 +554,8 @@ lessCentralDir lessLoadCentralDirectory(const char *fileName)
     lessCentralDir dir = { 0 };
     FILE *lessFile = fopen(fileName, "rb");
 
-    if (lessFile != NULL)
-    {
-        lessFileHeader header = { 0 };
-        fread(&header, sizeof(lessFileHeader), 1, lessFile);
-
-        if ( lessVerifyFileHeader(header) )
-        {
-            // Check if there is a Central Directory available
-            if (header.cdOffset == 0) LESS_LOG("LESS: WARNING: CDIR: No central directory found\n");
-            else
-            {
-                lessResourceChunkInfo info = { 0 };
-
-                fseek(lessFile, header.cdOffset, SEEK_SET); // Move to central directory position
-                fread(&info, sizeof(lessResourceChunkInfo), 1, lessFile); // Read resource info
-
-                // Verify resource type is CDIR
-                if ((info.type[0] == 'C') && (info.type[1] == 'D') && (info.type[2] == 'I') && (info.type[3] == 'R'))
-                {
-                    LESS_LOG("LESS: CDIR: Central Directory found at offset: 0x%08x\n", header.cdOffset);
-
-                    void *data = LESS_CALLOC(info.packedSize, 1);
-                    fread(data, info.packedSize, 1, lessFile);
-
-                    lessResourceChunkData chunkData = { 0 };
-                    chunkData.raw = data;
-
-                    dir.count = *(unsigned int*)chunkData.raw;
-                    LESS_LOG("LESS: CDIR: Central Directory file entries count: %i\n", dir.count);
-
-                    unsigned char *ptr = (unsigned char *)chunkData.raw + sizeof(int);
-                    dir.entries = (lessDirEntry *)LESS_CALLOC(dir.count, sizeof(lessDirEntry));
-
-                    for (unsigned int i = 0; i < dir.count; i++)
-                    {
-                        dir.entries[i].id = ((int *)ptr)[0];            // Resource id
-                        dir.entries[i].offset = ((int *)ptr)[1];        // Resource offset in file
-                        // NOTE: There is a reserved integer value before fileNameSize
-                        dir.entries[i].fileNameSize = ((int *)ptr)[3];  // Resource fileName size
-
-                        // Resource fileName, NULL terminated and 0-padded to 4-byte,
-                        // fileNameSize considers NULL and padding
-                        memcpy(dir.entries[i].fileName, ptr + 16, dir.entries[i].fileNameSize);
-
-                        ptr += (16 + dir.entries[i].fileNameSize);      // Move pointer for next entry
-                    }
-
-                    LESS_FREE(chunkData.raw);
-                }
-            }
-        }
-        else LESS_LOG("LESS: WARNING: The provided file is not a valid less file, file signature or version not valid\n");
-
+    if ( lessFile != NULL ) {
+        dir = lessLoadCentralDirectoryFP(lessFile);
         fclose(lessFile);
     }
 

@@ -16,6 +16,8 @@ i figure single data buffer is enough
 + mod: renamed all functions from rresName to lessName
 + mod: changed header magic bytes so i dont misstake this for original .rres
 
++ mod: added some functions to work with file pointers
+
 ---
 
 + mod: removed props since i only deal with raw data
