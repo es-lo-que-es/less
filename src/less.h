@@ -225,49 +225,30 @@ bool lessVerifyFileHeader(lessFileHeader header)
 lessResourceChunk lessLoadResourceChunkFP(FILE *lessFile, unsigned int lessId)
 {
    lessResourceChunk chunk = { 0 };
+   lessCentralDir cdir = lessLoadCentralDirectoryFP(lessFile);
 
-   lessFileHeader header = { 0 };
-   fseek(lessFile, 0, SEEK_SET);
-   fread(&header, sizeof(lessFileHeader), 1, lessFile);
+   for ( int i = 0; i < cdir.count; ++i ) {
+      
+      if ( cdir.entries[i].id == lessId ) {
+         
+         unsigned int offset = cdir.entries[i].offset;
 
-   if ( lessVerifyFileHeader(header) ) {
+         fseek(lessFile, offset, SEEK_SET);
+         fread(&chunk.info, sizeof(lessResourceChunkInfo), 1, lessFile);
 
-      bool found = false;
-      for (int i = 0; i < header.chunkCount; i++) {
-
-         lessResourceChunkInfo info = { 0 };
-         fread(&info, sizeof(lessResourceChunkInfo), 1, lessFile);
-
-         // Check if resource id is the requested one
-         if ( info.id == lessId ) {
-
-            found = true;
-            LESS_LOG("LESS: INFO: Found requested resource id: 0x%08x\n", info.id);
-            LESS_LOG("LESS: %c%c%c%c: Id: 0x%08x | Base size: %i | Packed size: %i\n", info.type[0], info.type[1], info.type[2], info.type[3], info.id, info.baseSize, info.packedSize);
-
-            if ( info.nextOffset != 0 ) {
-               LESS_LOG("LESS: WARNING: Multiple linked resource chunks available for the provided id");
-            }
-
-            void *data = LESS_CALLOC(info.packedSize, 1); 
-            fread(data, info.packedSize, 1, lessFile);    
-
-            chunk.data.raw = data;
-            chunk.info = info;
-            break;      // Resource id found and loaded, stop checking the file
-                        
-         } else {
-            // Skip required data size to read next resource info header
-            fseek(lessFile, info.packedSize, SEEK_CUR);
+         if ( chunk.info.nextOffset != 0 ) {
+            LESS_LOG("LESS: WARNING: Multiple linked resource chunks available for the provided id");
          }
+
+         void *data = LESS_CALLOC(chunk.info.packedSize, 1); 
+         fread(data, chunk.info.packedSize, 1, lessFile);    
+
+         chunk.data.raw = data;
+         break;
       }
-
-      if ( !found ) LESS_LOG("LESS: WARNING: Requested resource not found: 0x%08x\n", lessId);
-
-   } else {
-      LESS_LOG("LESS: WARNING: The provided file is not a valid less file, signature or version not valid\n");
    }
 
+   lessUnloadCentralDirectory(cdir);
    return chunk;
 }
 
@@ -439,7 +420,7 @@ LESSAPI lessResourceChunkInfo lessLoadResourceChunkInfo(const char *fileName, un
 LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAllFP(FILE *lessFile, unsigned int *chunkCount)
 {
    unsigned int count = 0;
-   lessResourceChunkInfo *infos = NULL;
+   lessResourceChunkInfo *infos = { 0 };
 
    lessFileHeader header = { 0 };
    fseek(lessFile, 0, SEEK_SET);
@@ -470,7 +451,7 @@ LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAllFP(FILE *lessFile, un
 LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAll(const char *fileName, unsigned int *chunkCount)
 {
    unsigned int count = 0;
-   lessResourceChunkInfo *infos = NULL;
+   lessResourceChunkInfo *infos = { 0 };
 
    FILE *lessFile = fopen(fileName, "rb");
 
