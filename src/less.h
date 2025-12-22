@@ -20,19 +20,6 @@
 // Defines and Macros
 //----------------------------------------------------------------------------------
 
-// Allow custom memory allocators
-#ifndef LESS_MALLOC
-    #define LESS_MALLOC(sz)         malloc(sz)
-#endif
-#ifndef LESS_CALLOC
-    #define LESS_CALLOC(ptr,sz)     calloc(ptr,sz)
-#endif
-#ifndef LESS_REALLOC
-    #define LESS_REALLOC(ptr,sz)    realloc(ptr,sz)
-#endif
-#ifndef LESS_FREE
-    #define LESS_FREE(ptr)          free(ptr)
-#endif
 
 // Simple log system to avoid printf() calls if required
 // NOTE: Avoiding those calls, also avoids const strings memory usage
@@ -240,7 +227,7 @@ lessResourceChunk lessLoadResourceChunkFP(FILE *lessFile, unsigned int lessId)
             LESS_LOG("LESS: ERROR: Multiple linked resource chunks available for the provided id");
          }
 
-         void *data = LESS_CALLOC(chunk.info.packedSize, 1); 
+         void *data = calloc(chunk.info.packedSize, 1); 
          fread(data, chunk.info.packedSize, 1, lessFile);    
          
          unsigned int crc32 = lessComputeCRC32((const unsigned char *)data, chunk.info.packedSize);
@@ -248,7 +235,7 @@ lessResourceChunk lessLoadResourceChunkFP(FILE *lessFile, unsigned int lessId)
          if ( crc32 != chunk.info.crc32 ) {
             LESS_LOG("LESS: ERROR: chunk signature doesnt match");
             chunk = (lessResourceChunk) { 0 };
-            LESS_FREE(data);
+            free(data);
          } else {
             chunk.data.raw = data;
          }
@@ -282,7 +269,7 @@ lessResourceChunk lessLoadResourceChunk(const char *fileName, unsigned int lessI
 // Unload resource chunk from memory
 void lessUnloadResourceChunk(lessResourceChunk chunk)
 {
-    LESS_FREE(chunk.data.raw);    // Resource chunk raw data
+    free(chunk.data.raw);    // Resource chunk raw data
 }
 
 // Load resource from file by id
@@ -327,13 +314,13 @@ lessResourceMulti lessLoadResourceMulti(const char *fileName, unsigned int lessI
                         less.count++;
                     }
 
-                    less.chunks = (lessResourceChunk *)LESS_CALLOC(less.count, sizeof(lessResourceChunk)); // Load as many less slots as required
+                    less.chunks = (lessResourceChunk *)calloc(less.count, sizeof(lessResourceChunk)); // Load as many less slots as required
                     fseek(lessFile, currentFileOffset, SEEK_SET);           // Return to first resource chunk position
 
                     // Read and load data chunk from file data
                     // NOTE: Read data can be compressed,
                     // it's up to the user library to manage decompression/decryption
-                    void *data = LESS_CALLOC(info.packedSize, 1);           // Allocate enough memory to store resource data chunk
+                    void *data = calloc(info.packedSize, 1);           // Allocate enough memory to store resource data chunk
                     fread(data, info.packedSize, 1, lessFile);              // Read data: propsCount + props[] + data (+additional_data)
 
                     // Get chunk.data properly organized (only if uncompressed/unencrypted)
@@ -349,7 +336,7 @@ lessResourceMulti lessLoadResourceMulti(const char *fileName, unsigned int lessI
 
                         LESS_LOG("LESS: %c%c%c%c: Id: 0x%08x | Base size: %i | Packed size: %i\n", info.type[0], info.type[1], info.type[2], info.type[3], info.id, info.baseSize, info.packedSize);
 
-                        void *data = LESS_CALLOC(info.packedSize, 1);       // Allocate enough memory to store resource data chunk
+                        void *data = calloc(info.packedSize, 1);       // Allocate enough memory to store resource data chunk
                         fread(data, info.packedSize, 1, lessFile);          // Read data: propsCount + props[] + data (+additional_data)
 
                         // Get chunk.data properly organized (only if uncompressed/unencrypted)
@@ -381,7 +368,7 @@ lessResourceMulti lessLoadResourceMulti(const char *fileName, unsigned int lessI
 void lessUnloadResourceMulti(lessResourceMulti multi)
 {
     for (unsigned int i = 0; i < multi.count; i++) lessUnloadResourceChunk(multi.chunks[i]);
-    LESS_FREE(multi.chunks);
+    free(multi.chunks);
 }
 
 // Load resource chunk info for provided id
@@ -434,7 +421,7 @@ LESSAPI lessResourceChunkInfo *lessLoadResourceChunkInfoAllFP(FILE *lessFile, un
    if ( lessVerifyFileHeader(header) ) {
 
       // Load all resource chunks info
-      infos = (lessResourceChunkInfo *)LESS_CALLOC(header.chunkCount, sizeof(lessResourceChunkInfo));
+      infos = (lessResourceChunkInfo *)calloc(header.chunkCount, sizeof(lessResourceChunkInfo));
       count = header.chunkCount;
 
       for (unsigned int i = 0; i < count; i++) {
@@ -495,7 +482,7 @@ lessCentralDir lessLoadCentralDirectoryFP(FILE *lessFile)
           // Verify resource type is CDIR
           if ((info.type[0] == 'C') && (info.type[1] == 'D') && (info.type[2] == 'I') && (info.type[3] == 'R'))
           {
-              void *data = LESS_CALLOC(info.packedSize, 1);
+              void *data = calloc(info.packedSize, 1);
               fread(data, info.packedSize, 1, lessFile);
 
               lessResourceChunkData chunkData = { 0 };
@@ -503,7 +490,7 @@ lessCentralDir lessLoadCentralDirectoryFP(FILE *lessFile)
 
               dir.count = *(unsigned int*)chunkData.raw;
               unsigned char *ptr = (unsigned char *)chunkData.raw + sizeof(int);
-              dir.entries = (lessDirEntry *)LESS_CALLOC(dir.count, sizeof(lessDirEntry));
+              dir.entries = (lessDirEntry *)calloc(dir.count, sizeof(lessDirEntry));
 
               for (unsigned int i = 0; i < dir.count; i++)
               {
@@ -519,7 +506,7 @@ lessCentralDir lessLoadCentralDirectoryFP(FILE *lessFile)
                   ptr += (16 + dir.entries[i].fileNameSize);      // Move pointer for next entry
               }
 
-              LESS_FREE(chunkData.raw);
+              free(chunkData.raw);
           }
       }
    } else {
@@ -547,7 +534,7 @@ lessCentralDir lessLoadCentralDirectory(const char *fileName)
 // Unload central directory data
 void lessUnloadCentralDirectory(lessCentralDir dir)
 {
-    LESS_FREE(dir.entries);
+    free(dir.entries);
 }
 
 // Get lessResourceDataType from FourCC code
