@@ -135,6 +135,7 @@ extern "C" {            // Prevents name mangling of functions
 #include "stdio.h"
 
 // Load only one resource chunk (first resource id found)
+LESSAPI lessResourceChunk lessLoadResourceChunkStreaming(FILE *file, lessCentralDir cdir, unsigned int lessId);  
 LESSAPI lessResourceChunk lessLoadResourceChunk(const char *fileName, unsigned int lessId);  
 LESSAPI lessResourceChunk lessLoadResourceChunkFP(FILE *file, unsigned int lessId);  
 
@@ -209,17 +210,15 @@ bool lessVerifyFileHeader(lessFileHeader header)
 }
 
 
-lessResourceChunk lessLoadResourceChunkFP(FILE *lessFile, unsigned int lessId)
+LESSAPI lessResourceChunk lessLoadResourceChunkStreaming(FILE *lessFile, lessCentralDir cdir, unsigned int lessId)
 {
    lessResourceChunk chunk = { 0 };
-   lessCentralDir cdir = lessLoadCentralDirectoryFP(lessFile);
 
    for ( int i = 0; i < cdir.count; ++i ) {
-      
+
       if ( cdir.entries[i].id == lessId ) {
          
          unsigned int offset = cdir.entries[i].offset;
-
          fseek(lessFile, offset, SEEK_SET);
          fread(&chunk.info, sizeof(lessResourceChunkInfo), 1, lessFile);
 
@@ -243,6 +242,17 @@ lessResourceChunk lessLoadResourceChunkFP(FILE *lessFile, unsigned int lessId)
          break;
       }
    }
+
+   return chunk;
+}
+
+
+lessResourceChunk lessLoadResourceChunkFP(FILE *lessFile, unsigned int lessId)
+{
+   lessResourceChunk chunk = { 0 };
+   lessCentralDir cdir = lessLoadCentralDirectoryFP(lessFile);
+   
+   chunk = lessLoadResourceChunkStreaming(lessFile, cdir, lessId);
 
    lessUnloadCentralDirectory(cdir);
    return chunk;
