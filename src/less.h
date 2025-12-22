@@ -242,8 +242,17 @@ lessResourceChunk lessLoadResourceChunkFP(FILE *lessFile, unsigned int lessId)
 
          void *data = LESS_CALLOC(chunk.info.packedSize, 1); 
          fread(data, chunk.info.packedSize, 1, lessFile);    
+         
+         unsigned int crc32 = lessComputeCRC32((const unsigned char *)data, chunk.info.packedSize);
 
-         chunk.data.raw = data;
+         if ( crc32 != chunk.info.crc32 ) {
+            LESS_LOG("LESS: ERROR: chunk signature doesnt match");
+            chunk = (lessResourceChunk) { 0 };
+            LESS_FREE(data);
+         } else {
+            chunk.data.raw = data;
+         }
+
          break;
       }
    }
